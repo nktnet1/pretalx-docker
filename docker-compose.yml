@@ -1,49 +1,66 @@
-version: '3'
 services:
   pretalx:
-    image: pretalx/standalone:latest
-    container_name: pretalx
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
-    depends_on: 
-      - redis
-      - db
-    environment:
-      # Hint: Make sure you serve all requests for the `/static/` and `/media/` paths when debug is False. See [installation](https://docs.pretalx.org/administrator/installation/#step-7-ssl) for more information
-      PRETALX_FILESYSTEM_MEDIA: /public/media
-      PRETALX_FILESYSTEM_STATIC: /public/static
     ports:
-      - "80:80"
+      - "8000:80"
     volumes: 
-      - ./conf/pretalx.cfg:/etc/pretalx/pretalx.cfg:ro
-      - pretalx-data:/data
-      - pretalx-public:/public
-    labels:
-       traefik.docker.network: "pretalxdocker"
-       traefik.enable: "true"
+      - pretalx_data:/data
+      - pretalx_public_data:/public
+    environment:
+      # App
+      - PRETALX_SITE_NAME=${PRETALX_SITE_NAME}
+      - PRETALX_SITE_URL=${PRETALX_SITE_URL}
+      - PRETALX_CONFIG_FILE=/dev/null
+      - PRETALX_DEBUG=True
+      # Database
+      - PRETALX_DB_TYPE=postgresql
+      - PRETALX_DB_HOST=pretalx_postgres
+      - PRETALX_DB_PORT=5432
+      - PRETALX_DB_NAME=${POSTGRES_DB}
+      - PRETALX_DB_USER=${POSTGRES_USER}
+      - PRETALX_DB_PASS=${POSTGRES_PASSWORD}
+      # Cache
+      - PRETALX_REDIS=redis://:${REDIS_PASSWORD}@pretalx_redis:6379/1
+    depends_on:
+      pretalx_postgres:
+        condition: service_healthy
+      pretalx_redis:
+        condition: service_healthy
 
-  db:
-    image: mysql:latest
-    container_name: pretalx-db
+  pretalx_postgres:
+    image: postgres:17
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     restart: unless-stopped
     volumes:
-      - pretalx-db:/var/lib/mysql
-    environment:
-      MYSQL_DATABASE: pretalx
-      MYSQL_USER: pretalx
-      MYSQL_PASSWORD: veryunsecureplschange
-      MYSQL_RANDOM_ROOT_PASSWORD: "1"
-    command: ['mysqld', '--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+      - pretalx_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  redis:
+  pretalx_redis:
     image: redis:latest
-    container_name: pretalx-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
     restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes: 
-      - pretalx-redis:/data
+      - pretalx_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
-  pretalx-db:
-  pretalx-data:
-  pretalx-public:
-  pretalx-redis:
-
+  pretalx_data:
+  pretalx_public_data:
+  pretalx_postgres_data:
+  pretalx_redis_data:
